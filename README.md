@@ -1,15 +1,44 @@
-# Hasktorch Skeleton
+# Hasktorch Compose
 
-Similar to the [Cardano Skeleton](https://github.com/input-output-hk/cardano-skeleton),
-this repository serves as an example of how a downstream user of both Nix and Hasktorch
-can set up a development environment.
+In hasktorch, model specifications, values, and inference are defined separately. there are cases combining commonly used models. For example, we might want to connect three linear layers, or add one linear layer to an existing model.
+This repo provides a library to easily compose existing models.
+We plan to provide both an untyped API and a typed API, but we will prioritize the development of the untyped API.
 
-The Nix shell installs ghc with hasktorch. When there is a hasktorch cache in nixpkgs, building hasktorch will be skipped.
+This is an experimental library developed based on [hasktorch-skeleton](https://github.com/hasktorch/hasktorch-skeleton).
 
-# 3 Steps to happy Hasktorch coding
+List of planned features:
 
-1. Fork this repo and clone it locally.
-2. Launch a Nix shell with (optionally) CUDA, `hls`, and VS Code, `nix develop"`
-3. Install the [Haskell Language Server plugin](https://marketplace.visualstudio.com/items?itemName=alanz.vscode-hie-server) and set the `HIE Variant` to `ghcide`.
+- [x] Sequential
+- [ ] Extract layer
+- [ ] Test for each layer
+- [ ] Overlay layer
+- [ ] Concatenate layer
 
-Happy Hasktorch hacking!
+# Examples
+
+## Sequential
+
+This is an example of an MLP implementation, created by combining LinearSpec.
+
+```haskell
+type MLPSpec = LinearSpec :>>: ReluSpec :>>: LinearSpec :>>: ReluSpec :>>: LinearSpec
+type MLP = Linear :>>: (Relu :>>: (Linear :>>: (Relu :>>: Linear)))
+
+mlpSpec =
+  Forward (LinearSpec 784 64) $
+  Forward ReluSpec $
+  Forward (LinearSpec 64 32) $
+  Forward ReluSpec $
+  LinearSpec 32 10
+
+mlp :: (Randomizable MLPSpec MLP, HasForward MLP Tensor Tensor) => MLP -> Tensor -> Tensor
+mlp model input =
+  logSoftmax (Dim 1) $ forward model input
+```
+
+## Extract layer
+
+## Test for each layer
+
+For one input, take the outputs of all layers, then compare the shapes and values of all the layers.
+

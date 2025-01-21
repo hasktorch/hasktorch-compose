@@ -1,5 +1,5 @@
 cabal-version:       2.2
-name:                hasktorch-skeleton
+name:                hasktorch-compose
 version:             0.0.0.0
 synopsis:            See README for more info
 description:         See README for more info
@@ -24,12 +24,17 @@ common base
 common binary-base
   import: base
   ghc-options: -threaded -rtsopts -with-rtsopts=-N
-  build-depends: hasktorch-skeleton
+  build-depends: hasktorch-compose
 
 library
   import: base
   exposed-modules:
-    HasktorchSkeleton
+    Torch.Compose
+    Torch.Compose.NN
+    Torch.Compose.Models
+    Torch.Typed.Compose
+    Torch.Typed.Compose.NN
+    Torch.Typed.Compose.Models
   hs-source-dirs: src
 
 executable example

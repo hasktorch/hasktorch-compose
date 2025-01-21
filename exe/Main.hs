@@ -1,6 +1,6 @@
 module Main where
 
-import HasktorchSkeleton
+import Torch.Compose
 
 main :: IO ()
 main = putStrLn "Hello Hasktorch!"
