@@ -18,6 +18,7 @@ List of planned features:
 
 ## Sequential
 
+Use `Forward` to join layers.
 This is an example of an MLP implementation, created by combining LinearSpec.
 
 ```haskell

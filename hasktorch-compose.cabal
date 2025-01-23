@@ -36,8 +36,21 @@ library
     Torch.Typed.Compose.NN
     Torch.Typed.Compose.Models
   hs-source-dirs: src
+  default-extensions:  Strict
+                     , StrictData
 
+test-suite spec
+  type:               exitcode-stdio-1.0
+  hs-source-dirs:     test
+  main-is:            Spec.hs
+  build-depends:      base
+                    , hasktorch
+                    , hasktorch-compose
+                    , hspec
+                     
 executable example
   import: binary-base
   main-is: Main.hs
   hs-source-dirs: exe
+
+

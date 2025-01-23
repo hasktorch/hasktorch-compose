@@ -1,6 +1,6 @@
 {
   nixConfig = {
-    bash-prompt = "\[hasktorch-compose(__git_ps1 \" (%s)\")\]$ ";
+    bash-prompt = "\[hasktorch-compose$(__git_ps1 \" (%s)\")\]$ ";
   };
   inputs = {
     utils.url = "github:numtide/flake-utils";
