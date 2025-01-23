@@ -24,10 +24,12 @@ import Torch.NN
 import Torch.Functional
 import GHC.Generics hiding ((:+:))
 
-data (:>>:) a b = Forward
+data (:>>:) a b = (:>>:)
   { head :: a
   , tail :: b
   } deriving (Show, Eq, Generic)
+
+infixr 5 :>>:
 
 data (://:) a b = Fanout
   { head :: a
@@ -45,14 +47,14 @@ data (:++:) a b = Concat
   } deriving (Show, Eq, Generic)
 
 instance (Randomizable spec0 f0, Randomizable spec1 f1) => Randomizable (spec0 :>>: spec1) (f0 :>>: f1) where
-  sample (Forward s0 s1) = do
+  sample ((:>>:) s0 s1) = do
     f0 <- sample s0
     f1 <- sample s1
-    return (Forward f0 f1)
+    return ((:>>:) f0 f1)
 
 instance (HasForward f a b, HasForward g b c) => HasForward (f :>>: g) a c where
-  forward (Forward f g) a = forward g (forward f a)
-  forwardStoch (Forward f g) a = forwardStoch f a >>= forwardStoch g 
+  forward ((:>>:) f g) a = forward g (forward f a)
+  forwardStoch ((:>>:) f g) a = forwardStoch f a >>= forwardStoch g
 
 instance (Randomizable spec0 f0, Randomizable spec1 f1) => Randomizable (spec0 ://: spec1) (f0 ://: f1) where
   sample (Fanout s0 s1) = do
@@ -123,7 +125,7 @@ class HasLast x r | x -> r where
   getLast :: x -> r
 
 instance HasLast b r => HasLast (a :>>: b) r where
-  getLast (Forward _ b) = getLast b
+  getLast ((:>>:) _ b) = getLast b
 
 instance HasLast a a where
   getLast = id
@@ -136,7 +138,7 @@ class HasFirst x r | x -> r where
   getFirst :: x -> r
 
 instance HasFirst a r => HasFirst (a :>>: b) r where
-  getFirst (Forward a _) = getFirst a
+  getFirst ((:>>:) a _) = getFirst a
 
 instance HasFirst a a where
   getFirst = id
@@ -151,7 +153,7 @@ class HasOutputs f a where
 
 instance (HasForwardAssoc f0 a, HasOutputs f0 a, HasOutputs f1 (ForwardResult f0 a)) => HasOutputs (f0 :>>: f1) a where
   type Outputs (f0 :>>: f1) a = Outputs f0 a :>>: Outputs f1 (ForwardResult f0 a)
-  toOutputs (Forward f0 f1) a  = Forward (toOutputs f0 a) (toOutputs f1 (forwardAssoc f0 a))
+  toOutputs ((:>>:) f0 f1) a  = (:>>:) (toOutputs f0 a) (toOutputs f1 (forwardAssoc f0 a))
 
 class HasInputs f a where
   type Inputs f a
@@ -159,7 +161,7 @@ class HasInputs f a where
 
 instance (HasForwardAssoc f0 a, HasInputs f0 a, HasInputs f1 (ForwardResult f0 a)) => HasInputs (f0 :>>: f1) a where
   type Inputs (f0 :>>: f1) a = Inputs f0 a :>>: Inputs f1 (ForwardResult f0 a)
-  toInputs (Forward f0 f1) a  = Forward (toInputs f0 a) (toInputs f1 (forwardAssoc f0 a))
+  toInputs ((:>>:) f0 f1) a  = (:>>:) (toInputs f0 a) (toInputs f1 (forwardAssoc f0 a))
 
 
 class HasOutputShapes f a where
@@ -168,5 +170,5 @@ class HasOutputShapes f a where
 
 instance (HasForwardAssoc f0 a, HasOutputShapes f0 a, HasOutputShapes f1 (ForwardResult f0 a)) => HasOutputShapes (f0 :>>: f1) a where
   type OutputShapes (f0 :>>: f1) a = OutputShapes f0 a :>>: OutputShapes f1 (ForwardResult f0 a)
-  toOutputShapes (Forward f0 f1) a  = Forward (toOutputShapes f0 a) (toOutputShapes f1 (forwardAssoc f0 a))
+  toOutputShapes ((:>>:) f0 f1) a  = (:>>:) (toOutputShapes f0 a) (toOutputShapes f1 (forwardAssoc f0 a))
 

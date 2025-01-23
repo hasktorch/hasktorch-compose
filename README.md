@@ -18,7 +18,7 @@ List of planned features:
 
 ## Sequential
 
-Use `Forward` to join layers.
+Use `:>>:` operator to join layers.
 This is an example of an MLP implementation, created by combining LinearSpec.
 
 ```haskell
@@ -26,10 +26,10 @@ type MLPSpec = LinearSpec :>>: ReluSpec :>>: LinearSpec :>>: ReluSpec :>>: Linea
 type MLP = Linear :>>: (Relu :>>: (Linear :>>: (Relu :>>: Linear)))
 
 mlpSpec =
-  Forward (LinearSpec 784 64) $
-  Forward ReluSpec $
-  Forward (LinearSpec 64 32) $
-  Forward ReluSpec $
+  LinearSpec 784 64 :>>:
+  ReluSpec :>>:
+  LinearSpec 64 32) :>>:
+  ReluSpec :>>:
   LinearSpec 32 10
 
 mlp :: (Randomizable MLPSpec MLP, HasForward MLP Tensor Tensor) => MLP -> Tensor -> Tensor

@@ -117,13 +117,6 @@ instance Randomizable BatchNorm2dSpec BatchNorm2d where
     runningVar <- newMutableTensor $ ones' [channelSize]
     pure BatchNorm2d{..}
 
-resnetSpec numClass =
-  Forward (Conv2dSpec 3 64 7 7) $
-  Forward (BatchNorm2dSpec 64) $
-  Forward ReluSpec $
-  Forward (Conv2dSpec 64 64 3 3)
-  
-
 instance HasOutputs Linear Tensor where
   type Outputs Linear Tensor = Tensor
   toOutputs = forward

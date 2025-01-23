@@ -29,10 +29,10 @@ newtype MLP = MLP (Linear :>>: (Relu :>>: (Linear :>>: (Relu :>>: Linear)))) der
 
 mlpSpec :: MLPSpec
 mlpSpec = MLPSpec $
-  Forward (LinearSpec 784 64) $
-  Forward ReluSpec $
-  Forward (LinearSpec 64 32) $
-  Forward ReluSpec $
+  LinearSpec 784 64 :>>:
+  ReluSpec :>>:
+  LinearSpec 64 32 :>>:
+  ReluSpec :>>:
   LinearSpec 32 10
 
 instance HasForward MLP Tensor Tensor where
@@ -62,6 +62,6 @@ main = hspec $ do
   it "Extract all output shapes" $ do
     (MLP (model :: a)) <- sample mlpSpec
     let out = toOutputShapes model (ones' [2,784])
-        exp = Forward [2,64] $ Forward [2,64] $ Forward [2,32] $ Forward [2,32] [2,10]
+        exp = [2,64] :>>: [2,64] :>>: [2,32] :>>: [2,32] :>>: [2,10]
     out `shouldBe` exp
     
