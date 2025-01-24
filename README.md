@@ -1,18 +1,17 @@
 # Hasktorch Compose
 
-In hasktorch, model specifications, values, and inference are defined separately. there are cases combining commonly used models. For example, we might want to connect three linear layers, or add one linear layer to an existing model.
-This repo provides a library to easily compose existing models.
-We plan to provide both an untyped API and a typed API, but we will prioritize the development of the untyped API.
+In Hasktorch, model specifications, values, and inference are defined separately. This often necessitates combining commonly used models. For example, three linear layers may need to be connected in sequence, or a new linear layer could be added to an existing model. Hasktorch Compose provides a straightforward way to compose such models.
 
-This is an experimental library developed based on [hasktorch-skeleton](https://github.com/hasktorch/hasktorch-skeleton).
+In addition to simple model composition, this library aims to support extracting parts of models and sharing parameters between different models, such as ControlNet and RoLa. Both an untyped API and a typed API are planned, with initial development focused on the untyped API.
 
-List of planned features:
+Hasktorch Compose is an experimental library built on top of [hasktorch-skeleton](https://github.com/hasktorch/hasktorch-skeleton).
 
+**Planned Features:**
 - [x] Sequential
 - [ ] Extract layer
 - [ ] Test for each layer
 - [ ] Overlay layer
-- [ ] Concatenate layer
+- [x] Concatenate layer
 
 # Examples
 
@@ -30,11 +29,11 @@ mlpSpec =
   ReluSpec :>>:
   LinearSpec 64 32) :>>:
   ReluSpec :>>:
-  LinearSpec 32 10
+  LinearSpec 32 10 :>>:
+  LogSoftMaxSpec
 
 mlp :: (Randomizable MLPSpec MLP, HasForward MLP Tensor Tensor) => MLP -> Tensor -> Tensor
-mlp model input =
-  logSoftmax (Dim 1) $ forward model input
+mlp model input = forward model input
 ```
 
 ## Extract layer

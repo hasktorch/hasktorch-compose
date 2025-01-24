@@ -117,6 +117,16 @@ instance Randomizable BatchNorm2dSpec BatchNorm2d where
     runningVar <- newMutableTensor $ ones' [channelSize]
     pure BatchNorm2d{..}
 
+data LogSoftMaxSpec = LogSoftMaxSpec deriving (Generic, Show, Eq)
+data LogSoftMax = LogSoftMax deriving (Generic, Parameterized, Show, Eq)
+instance Randomizable LogSoftMaxSpec LogSoftMax where
+  sample _ = pure LogSoftMax
+
+instance HasForward LogSoftMax Tensor Tensor where
+  forward _ = logSoftmax (Dim 1)
+  forwardStoch _ i = pure $ logSoftmax (Dim 1) i
+
+
 instance HasOutputs Linear Tensor where
   type Outputs Linear Tensor = Tensor
   toOutputs = forward
@@ -141,11 +151,28 @@ instance HasOutputShapes Relu Tensor where
   type OutputShapes Relu Tensor = [Int]
   toOutputShapes model a = shape $ forward model a
 
+instance HasOutputs LogSoftMax Tensor where
+  type Outputs LogSoftMax Tensor = Tensor
+  toOutputs = forward
+
+instance HasInputs LogSoftMax Tensor where
+  type Inputs LogSoftMax Tensor = Tensor
+  toInputs _ a = a
+
+instance HasOutputShapes LogSoftMax Tensor where
+  type OutputShapes LogSoftMax Tensor = [Int]
+  toOutputShapes model a = shape $ forward model a
+
+
 instance HasForwardAssoc Linear Tensor where
   type ForwardResult Linear Tensor = Tensor
   forwardAssoc = forward
 
 instance HasForwardAssoc Relu Tensor where
   type ForwardResult Relu Tensor = Tensor
+  forwardAssoc = forward
+
+instance HasForwardAssoc LogSoftMax Tensor where
+  type ForwardResult LogSoftMax Tensor = Tensor
   forwardAssoc = forward
 
