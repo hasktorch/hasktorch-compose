@@ -1,20 +1,22 @@
-{-# LANGUAGE TypeOperators#-}
-{-# LANGUAGE FlexibleInstances#-}
-{-# LANGUAGE MultiParamTypeClasses#-}
-{-# LANGUAGE UndecidableInstances#-}
-{-# LANGUAGE DeriveGeneric#-}
+{-# LANGUAGE DataKinds #-}
 {-# LANGUAGE DeriveAnyClass#-}
+{-# LANGUAGE DeriveGeneric#-}
 {-# LANGUAGE DuplicateRecordFields#-}
+{-# LANGUAGE FlexibleContexts#-}
+{-# LANGUAGE FlexibleInstances#-}
+{-# LANGUAGE FunctionalDependencies#-}
+{-# LANGUAGE GADTs#-}
+{-# LANGUAGE MultiParamTypeClasses#-}
+{-# LANGUAGE OverloadedRecordDot#-}
+{-# LANGUAGE PartialTypeSignatures #-}
+{-# LANGUAGE PolyKinds #-}
 {-# LANGUAGE RecordWildCards#-}
 {-# LANGUAGE ScopedTypeVariables#-}
 {-# LANGUAGE TypeApplications#-}
 {-# LANGUAGE TypeFamilies#-}
-{-# LANGUAGE GADTs#-}
-{-# LANGUAGE OverloadedRecordDot#-}
-{-# LANGUAGE FlexibleContexts#-}
-{-# LANGUAGE FunctionalDependencies#-}
 {-# LANGUAGE TypeFamilyDependencies#-}
-{-# LANGUAGE PartialTypeSignatures #-}
+{-# LANGUAGE TypeOperators#-}
+{-# LANGUAGE UndecidableInstances#-}
 
 
 module Torch.Compose where
@@ -23,13 +25,31 @@ import Torch
 import Torch.NN
 import Torch.Functional
 import GHC.Generics hiding ((:+:))
+-- import Data.Void
+import Data.HList
+import Data.HList (hAppend)
+import Data.Kind
+import Data.Coerce
+import Control.Exception
+import System.IO.Unsafe
 
-data (:>>:) a b = (:>>:)
-  { head :: a
-  , tail :: b
-  } deriving (Show, Eq, Generic)
+instance (Randomizable spec0 f0, Randomizable (HList spec1) (HList f1)) => Randomizable (HList (spec0 ': spec1)) (HList (f0 ': f1)) where
+  sample (HCons s0 s1) = do
+    f0 <- sample s0
+    f1 <- sample s1
+    return (f0 .*. f1)
 
-infixr 5 :>>:
+instance Randomizable (HList '[]) (HList '[]) where
+  sample HNil = do
+    return HNil
+
+instance (HasForward f a b, HasForward (HList g) b c) => HasForward (HList (f ': g)) a c where
+  forward (HCons f g) a = forward g (forward f a)
+  forwardStoch (HCons f g) a = forwardStoch f a >>= forwardStoch g
+
+instance HasForward (HList '[]) a a where
+  forward _ = id
+  forwardStoch _ = pure
 
 data (://:) a b = Fanout
   { head :: a
@@ -45,16 +65,6 @@ data (:++:) a b = Concat
   { head :: a
   , tail :: b
   } deriving (Show, Eq, Generic)
-
-instance (Randomizable spec0 f0, Randomizable spec1 f1) => Randomizable (spec0 :>>: spec1) (f0 :>>: f1) where
-  sample ((:>>:) s0 s1) = do
-    f0 <- sample s0
-    f1 <- sample s1
-    return ((:>>:) f0 f1)
-
-instance (HasForward f a b, HasForward g b c) => HasForward (f :>>: g) a c where
-  forward ((:>>:) f g) a = forward g (forward f a)
-  forwardStoch ((:>>:) f g) a = forwardStoch f a >>= forwardStoch g
 
 instance (Randomizable spec0 f0, Randomizable spec1 f1) => Randomizable (spec0 ://: spec1) (f0 ://: f1) where
   sample (Fanout s0 s1) = do
@@ -117,58 +127,78 @@ instance (HasForward a b b) => HasForward (Replicate a) b b where
   forwardStoch (Replicate []) input = pure input
   forwardStoch (Replicate (a:ax)) input = forwardStoch (Replicate ax) =<< forwardStoch a input
 
-type family LastLayer x where
-  LastLayer (a :>>: b) = LastLayer b
-  LastLayer x          = x
-
-class HasLast x r | x -> r where
-  getLast :: x -> r
-
-instance HasLast b r => HasLast (a :>>: b) r where
-  getLast ((:>>:) _ b) = getLast b
-
-instance HasLast a a where
-  getLast = id
-
-type family FirstLayer x where
-  FirstLayer (a :>>: b) = a
-  FirstLayer x          = x
-
-class HasFirst x r | x -> r where
-  getFirst :: x -> r
-
-instance HasFirst a r => HasFirst (a :>>: b) r where
-  getFirst ((:>>:) a _) = getFirst a
-
-instance HasFirst a a where
-  getFirst = id
-
 class HasForwardAssoc f a where
-  type ForwardResult f a
+  type ForwardResult f a :: Type
   forwardAssoc :: f -> a -> ForwardResult f a
 
-class HasOutputs f a where
-  type Outputs f a
-  toOutputs :: f -> a -> Outputs f a
+toHList :: x -> HList '[x]
+toHList x = HCons x HNil
 
-instance (HasForwardAssoc f0 a, HasOutputs f0 a, HasOutputs f1 (ForwardResult f0 a)) => HasOutputs (f0 :>>: f1) a where
-  type Outputs (f0 :>>: f1) a = Outputs f0 a :>>: Outputs f1 (ForwardResult f0 a)
-  toOutputs ((:>>:) f0 f1) a  = (:>>:) (toOutputs f0 a) (toOutputs f1 (forwardAssoc f0 a))
+instance (HasForwardAssoc f a) => HasForwardAssoc f (HList '[a]) where
+  type ForwardResult f (HList '[a]) = HList '[ForwardResult f a]
+  forwardAssoc f (HCons a HNil) = toHList $ forwardAssoc f a
 
-class HasInputs f a where
-  type Inputs f a
-  toInputs :: f -> a -> Inputs f a
+dropLastLayer :: (Coercible a (HList xs1), HRevApp xs2 '[x] xs1, HRevApp xs2 '[] sx,  HRevApp xs1 '[] (x : xs2), HRevApp sx '[] xs2) => a -> HList sx
+dropLastLayer m = hReverse (hDrop (Proxy :: Proxy (HSucc HZero)) (hReverse (coerce m)))
 
-instance (HasForwardAssoc f0 a, HasInputs f0 a, HasInputs f1 (ForwardResult f0 a)) => HasInputs (f0 :>>: f1) a where
-  type Inputs (f0 :>>: f1) a = Inputs f0 a :>>: Inputs f1 (ForwardResult f0 a)
-  toInputs ((:>>:) f0 f1) a  = (:>>:) (toInputs f0 a) (toInputs f1 (forwardAssoc f0 a))
+addLastLayer :: HAppend l1 (HList '[e]) => l1 -> e -> HAppendR l1 (HList '[e])
+addLastLayer a b = a `hAppend` (b .*. HNil)
 
+getLastLayer :: (Coercible a (HList l1), HRevApp l1 '[] (e : l)) => a -> e
+getLastLayer a = hLast (coerce a)
 
-class HasOutputShapes f a where
-  type OutputShapes f a
-  toOutputShapes :: f -> a -> OutputShapes f a
+hScanl :: forall f z ls xs1 sx xs2. (HScanr f z ls xs1, HRevApp xs1 '[] sx, HRevApp sx '[] xs1,  HRevApp xs2 '[] ls, HRevApp ls '[] xs2) => f -> z -> HList xs2 -> HList sx
+hScanl a b c = hReverse $ hScanr a b (hReverse c)
 
-instance (HasForwardAssoc f0 a, HasOutputShapes f0 a, HasOutputShapes f1 (ForwardResult f0 a)) => HasOutputShapes (f0 :>>: f1) a where
-  type OutputShapes (f0 :>>: f1) a = OutputShapes f0 a :>>: OutputShapes f1 (ForwardResult f0 a)
-  toOutputShapes ((:>>:) f0 f1) a  = (:>>:) (toOutputShapes f0 a) (toOutputShapes f1 (forwardAssoc f0 a))
+safeEval :: forall a. a -> Maybe a
+safeEval x = unsafePerformIO $ do
+  result <- try (evaluate @a x) :: IO (Either SomeException a)
+  case result of
+    Left  _ -> return Nothing
+    Right v -> return (Just v)
 
+type family ForwardMap (xs :: [*]) (a :: *) :: [*] where
+  ForwardMap '[]  _ = '[]
+  ForwardMap (x ': xs) a = ForwardResult x a ': ForwardMap xs (ForwardResult x a)
+
+class Outputs xs input where
+  toOutputs' :: HList xs -> input -> HList (ForwardMap xs input)
+
+instance HasForwardAssoc x a => HasForwardAssoc x (Maybe a) where
+  type ForwardResult x (Maybe a) = Maybe (ForwardResult x a)
+  forwardAssoc x (Just a) = Just $ forwardAssoc x a
+  forwardAssoc x Nothing = Nothing
+  
+
+instance (HasForwardAssoc x a, Outputs xs (ForwardResult x a)) => Outputs (x ': xs) a where
+  toOutputs' (HCons x xs) a =
+    let out = forwardAssoc x a
+    in HCons out $ toOutputs' xs out
+
+instance Outputs '[] a where
+  toOutputs' _ _ = HNil
+
+toOutputs ::
+  (Coercible a (HList xs),
+   Outputs xs input
+  ) =>
+  a -> input -> HList (ForwardMap xs input)
+toOutputs f = toOutputs' (coerce f)
+
+toOutputShapes ::
+  (Coercible a (HList xs),
+   HMapAux HList (Tensor -> [Int]) (ForwardMap xs input) b,
+   SameLength' b (ForwardMap xs input),
+   SameLength' (ForwardMap xs input) b, Outputs xs input
+  ) =>
+  a -> input -> HList b
+toOutputShapes f a = hMap shape (toOutputs f a) 
+
+toMaybeOutputShapes ::
+  (Coercible a (HList xs),
+   HMapAux HList (Tensor -> Maybe [Int]) (ForwardMap xs input) b,
+   SameLength' b (ForwardMap xs input),
+   SameLength' (ForwardMap xs input) b, Outputs xs input
+  ) =>
+  a -> input -> HList b
+toMaybeOutputShapes f a = hMap (safeEval . shape) (toOutputs f a) 

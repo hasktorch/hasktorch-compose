@@ -20,6 +20,7 @@ common base
   build-depends:
       base >= 4.12 && < 5
     , hasktorch >= 0.2 && < 0.3
+    , HList
 
 common binary-base
   import: base
@@ -36,8 +37,8 @@ library
     Torch.Typed.Compose.NN
     Torch.Typed.Compose.Models
   hs-source-dirs: src
-  default-extensions:  Strict
-                     , StrictData
+--  default-extensions:  Strict
+--                     , StrictData
 
 test-suite spec
   type:               exitcode-stdio-1.0
@@ -47,6 +48,7 @@ test-suite spec
                     , hasktorch
                     , hasktorch-compose
                     , hspec
+                    , HList
                      
 executable example
   import: binary-base

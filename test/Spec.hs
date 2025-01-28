@@ -14,27 +14,46 @@
 {-# LANGUAGE TypeFamilies#-}
 {-# LANGUAGE AllowAmbiguousTypes#-}
 {-# LANGUAGE FunctionalDependencies#-}
-
+{-# LANGUAGE DataKinds#-}
+{-# LANGUAGE StandaloneDeriving#-}
 
 module Main where
 
 import Test.Hspec
 import Torch.Compose
 import Torch.Compose.NN
+import Torch.Compose.Models
 import Torch
 import GHC.Generics hiding ((:+:))
+import Data.HList
+import Data.Proxy
+import Data.Coerce
 
-newtype MLPSpec = MLPSpec (LinearSpec :>>: ReluSpec :>>: LinearSpec :>>: ReluSpec :>>: LinearSpec :>>: LogSoftMaxSpec) deriving (Generic)
-newtype MLP = MLP (Linear :>>: Relu :>>: Linear :>>: Relu :>>: Linear :>>: LogSoftMax) deriving (Generic)
+newtype MLPSpec = MLPSpec (HList [LinearSpec, ReluSpec, LinearSpec, ReluSpec, LinearSpec, LogSoftMaxSpec]) deriving (Generic, Show, Eq)
+newtype MLP = MLP (HList [Linear, Relu, Linear, Relu, Linear, LogSoftMax]) deriving (Generic, Show, Eq)
+
+deriving instance Eq Parameter
+deriving instance Eq Linear
 
 mlpSpec :: MLPSpec
 mlpSpec = MLPSpec $
-  LinearSpec 784 64 :>>:
-  ReluSpec :>>:
-  LinearSpec 64 32 :>>:
-  ReluSpec :>>:
-  LinearSpec 32 10 :>>:
-  LogSoftMaxSpec
+  LinearSpec 784 64 .*.
+  ReluSpec .*.
+  LinearSpec 64 32 .*.
+  ReluSpec .*.
+  LinearSpec 32 10 .*.
+  LogSoftMaxSpec .*.
+  HNil
+
+brokenMlpSpec :: MLPSpec
+brokenMlpSpec = MLPSpec $
+  LinearSpec 784 64 .*.
+  ReluSpec .*.
+  LinearSpec 60 32 .*.
+  ReluSpec .*.
+  LinearSpec 32 10 .*.
+  LogSoftMaxSpec .*.
+  HNil
 
 instance HasForward MLP Tensor Tensor where
   forward (MLP model) = forward model
@@ -44,7 +63,7 @@ instance Randomizable MLPSpec MLP where
   sample (MLPSpec spec) = MLP <$> sample spec
 
 mlp :: MLP -> Tensor -> Tensor
-mlp model input = forward model input
+mlp = forward
 
 main :: IO ()
 main = hspec $ do
@@ -53,14 +72,46 @@ main = hspec $ do
     shape (mlp model (ones' [2,784])) `shouldBe` [2,10]
   it "Extract the first layer" $ do
     (MLP (model :: a)) <- sample mlpSpec
-    let layer =  getFirst model :: FirstLayer a
+    let layer =  hHead model
     shape layer.weight.toDependent `shouldBe` [64,784]
   it "Extract the last layer" $ do
     (MLP (model :: a)) <- sample mlpSpec
-    let layer =  getLast model :: LastLayer a
+    let layer =  hLast model
     layer `shouldBe` LogSoftMax
-  it "Extract all output shapes" $ do
-    (MLP (model :: a)) <- sample mlpSpec
-    let out = toOutputShapes model (ones' [2,784])
-        exp = [2,64] :>>: [2,64] :>>: [2,32] :>>: [2,32] :>>: [2,10] :>>: [2,10]
-    out `shouldBe` exp
+  it "Get, drop and add the last layer" $ do
+    m <- sample mlpSpec
+    let model' = dropLastLayer m
+    let layer = getLastLayer model'
+        lastLayer = getLastLayer m
+    shape layer.weight.toDependent `shouldBe` [10,32]
+    let model_rev = addLastLayer model' lastLayer
+    coerce model_rev `shouldBe` m
+  it "Extract all output shapes of MLP" $ do
+    (MLP model) <- sample mlpSpec
+    let input = ones' [2,784]
+        output = forward model input
+        outputs = toOutputs model input
+        outputShapes = toOutputShapes model input
+        exp = [2,64] .*. [2,64] .*. [2,32] .*. [2,32] .*. [2,10] .*. [2,10] .*. HNil
+    outputShapes `shouldBe` exp
+  it "Find a broken layer" $ do
+    model <- sample brokenMlpSpec
+    let input = ones' [2,784]
+        output = forward model input
+        outputs = toOutputs model input
+        outputShapes = toMaybeOutputShapes model input
+        exp = Just [2,64] .*. Just [2,64] .*. Nothing .*. Nothing .*. Nothing .*. Nothing .*. HNil
+    outputShapes `shouldBe` exp
+  it "Check vgg16Spec" $ do
+    model <- sample (vgg16Spec 10)
+    let input = ones' [2,3,128,128]
+        outputShapes = toMaybeOutputShapes model input
+--        output = forward model input
+        exp =
+          Nothing .*. Nothing .*. Nothing .*. Nothing .*. Nothing .*.
+          Nothing .*. Nothing .*. Nothing .*. Nothing .*. Nothing .*.
+          Nothing .*. Nothing .*. Nothing .*. Nothing .*. Nothing .*.
+          Nothing .*. Nothing .*. Nothing .*. Nothing .*. Nothing .*.
+          Nothing .*. Nothing .*. HNil
+
+    outputShapes `shouldBe` exp
