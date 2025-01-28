@@ -17,7 +17,7 @@ Hasktorch Compose is an experimental library built on top of [hasktorch-skeleton
 
 ## Sequential
 
-Use `.*.*` operator of HList to join layers.
+Use `.*.` operator of HList to join layers.
 This is an example of an MLP implementation, created by combining LinearSpec.
 
 ```haskell
