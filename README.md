@@ -17,23 +17,32 @@ Hasktorch Compose is an experimental library built on top of [hasktorch-skeleton
 
 ## Sequential
 
-Use `:>>:` operator to join layers.
+Use `.*.*` operator of HList to join layers.
 This is an example of an MLP implementation, created by combining LinearSpec.
 
 ```haskell
-type MLPSpec = LinearSpec :>>: ReluSpec :>>: LinearSpec :>>: ReluSpec :>>: LinearSpec
-type MLP = Linear :>>: (Relu :>>: (Linear :>>: (Relu :>>: Linear)))
+newtype MLPSpec = MLPSpec (HList [LinearSpec, ReluSpec, LinearSpec, ReluSpec, LinearSpec, LogSoftMaxSpec]) deriving (Generic, Show, Eq)
+newtype MLP = MLP (HList [Linear, Relu, Linear, Relu, Linear, LogSoftMax]) deriving (Generic, Show, Eq)
 
-mlpSpec =
-  LinearSpec 784 64 :>>:
-  ReluSpec :>>:
-  LinearSpec 64 32) :>>:
-  ReluSpec :>>:
-  LinearSpec 32 10 :>>:
-  LogSoftMaxSpec
+mlpSpec :: MLPSpec
+mlpSpec = MLPSpec $
+  LinearSpec 784 64 .*.
+  ReluSpec .*.
+  LinearSpec 64 32 .*.
+  ReluSpec .*.
+  LinearSpec 32 10 .*.
+  LogSoftMaxSpec .*.
+  HNil
 
-mlp :: (Randomizable MLPSpec MLP, HasForward MLP Tensor Tensor) => MLP -> Tensor -> Tensor
-mlp model input = forward model input
+instance HasForward MLP Tensor Tensor where
+  forward (MLP model) = forward model
+  forwardStoch (MLP model) = forwardStoch model
+
+instance Randomizable MLPSpec MLP where
+  sample (MLPSpec spec) = MLP <$> sample spec
+
+mlp :: MLP -> Tensor -> Tensor
+mlp = forward
 ```
 
 ## Extract layer
