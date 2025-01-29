@@ -23,11 +23,11 @@ import Data.HList
 
 vgg16Spec numClass =
   let maxPool2dSpec = MaxPool2dSpec
-        { kernelSize = (3,3)
+        { kernelSize = (2,2)
         , stride = (2,2)
-        , padding = (1,1)
-        , dilation = (0,0)
-        , ceilMode = Ceil
+        , padding = (0,0)
+        , dilation = (1,1)
+        , ceilMode = Floor
         }
       vggClassifierSpec =
         LinearSpec (512 * 7 * 7) 4096 .*.
@@ -39,7 +39,7 @@ vgg16Spec numClass =
         LinearSpec 4096 numClass .*.
         HNil
       conv2dSpec inChannel outChannel kernelHeight kernelWidth =
-        Conv2dSpec' inChannel outChannel kernelHeight kernelWidth (1,1) (0,0)
+        Conv2dSpec' inChannel outChannel kernelHeight kernelWidth (1,1) (1,1)
   in
     conv2dSpec 3 64 3 3 .*.
     conv2dSpec 64 64 3 3 .*.
@@ -55,7 +55,7 @@ vgg16Spec numClass =
     conv2dSpec 512 512 3 3 .*.
     conv2dSpec 512 512 3 3 .*.
     AdaptiveAvgPool2dSpec (7,7) .*.
-    ReshapeSpec [1,512*7*7] .*.
+    ReshapeSpec [-1,512*7*7] .*.
     vggClassifierSpec
   
 -- resnetSpec numClass =

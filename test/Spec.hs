@@ -106,12 +106,10 @@ main = hspec $ do
     model <- sample (vgg16Spec 10)
     let input = ones' [2,3,128,128]
         outputShapes = toMaybeOutputShapes model input
---        output = forward model input
         exp =
-          Nothing .*. Nothing .*. Nothing .*. Nothing .*. Nothing .*.
-          Nothing .*. Nothing .*. Nothing .*. Nothing .*. Nothing .*.
-          Nothing .*. Nothing .*. Nothing .*. Nothing .*. Nothing .*.
-          Nothing .*. Nothing .*. Nothing .*. Nothing .*. Nothing .*.
-          Nothing .*. Nothing .*. HNil
-
+          Just [2,64,128,128] .*. Just [2,64,128,128] .*. Just [2,64,64,64] .*. Just [2,128,64,64] .*. Just [2,128,64,64] .*.
+          Just [2,128,32,32] .*. Just [2,256,32,32] .*. Just [2,256,32,32] .*. Just [2,256,32,32] .*. Just [2,256,16,16] .*.
+          Just [2,512,16,16] .*. Just [2,512,16,16] .*. Just [2,512,16,16] .*. Just [2,512,7,7] .*. Just [2,25088] .*.
+          Just [2,4096] .*. Just [2,4096] .*. Just [2,4096] .*. Just [2,4096] .*. Just [2,4096] .*.
+          Just [2,4096] .*. Just [2,10] .*. HNil
     outputShapes `shouldBe` exp
