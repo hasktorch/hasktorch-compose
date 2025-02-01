@@ -21,6 +21,14 @@ import Torch.Compose.NN
 import GHC.Generics hiding ((:+:))
 import Data.HList
 
+vgg16Spec
+  :: Int
+  -> HList
+     [Conv2dSpec', Conv2dSpec', MaxPool2dSpec, Conv2dSpec', Conv2dSpec',
+      MaxPool2dSpec, Conv2dSpec', Conv2dSpec', Conv2dSpec',
+      MaxPool2dSpec, Conv2dSpec', Conv2dSpec', Conv2dSpec',
+      AdaptiveAvgPool2dSpec, ReshapeSpec, LinearSpec, ReluSpec,
+      DropoutSpec, LinearSpec, ReluSpec, DropoutSpec, LinearSpec]
 vgg16Spec numClass =
   let maxPool2dSpec = MaxPool2dSpec
         { kernelSize = (2,2)

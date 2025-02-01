@@ -54,5 +54,3 @@ executable example
   import: binary-base
   main-is: Main.hs
   hs-source-dirs: exe
-
-

@@ -24,6 +24,7 @@ import Torch.Compose
 import Torch.Compose.NN
 import Torch.Compose.Models
 import Torch
+import Torch.Lens
 import GHC.Generics hiding ((:+:))
 import Data.HList
 import Data.Proxy
@@ -102,7 +103,7 @@ main = hspec $ do
         outputShapes = toMaybeOutputShapes model input
         exp = Just [2,64] .*. Just [2,64] .*. Nothing .*. Nothing .*. Nothing .*. Nothing .*. HNil
     outputShapes `shouldBe` exp
-  it "Check vgg16Spec" $ do
+  it "Check the shape of vgg16Spec" $ do
     model <- sample (vgg16Spec 10)
     let input = ones' [2,3,128,128]
         outputShapes = toMaybeOutputShapes model input
@@ -113,3 +114,10 @@ main = hspec $ do
           Just [2,4096] .*. Just [2,4096] .*. Just [2,4096] .*. Just [2,4096] .*. Just [2,4096] .*.
           Just [2,4096] .*. Just [2,10] .*. HNil
     outputShapes `shouldBe` exp
+  it "Add zero to fine-tune the last layer only with mergeParameters" $ do
+    m0 <- sample mlpSpec
+    m1' <- sample mlpSpec
+    let layer0 = getLastLayer m0
+        zero1 = over (types @Tensor) (ones' . shape) $ getLastLayer m1'
+        model' = addLastLayer (dropLastLayer m0) (mergeParameters (+) layer0 zero1)
+    return ()

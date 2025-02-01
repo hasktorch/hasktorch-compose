@@ -12,6 +12,7 @@
 {-# LANGUAGE PolyKinds #-}
 {-# LANGUAGE RecordWildCards#-}
 {-# LANGUAGE ScopedTypeVariables#-}
+{-# LANGUAGE StandaloneDeriving#-}
 {-# LANGUAGE TypeApplications#-}
 {-# LANGUAGE TypeFamilies#-}
 {-# LANGUAGE TypeFamilyDependencies#-}
@@ -32,6 +33,9 @@ import Data.Kind
 import Data.Coerce
 import Control.Exception
 import System.IO.Unsafe
+
+deriving instance Generic (HList '[])
+deriving instance Generic a => Generic (HList (a ': ax))
 
 instance (Randomizable spec0 f0, Randomizable (HList spec1) (HList f1)) => Randomizable (HList (spec0 ': spec1)) (HList (f0 ': f1)) where
   sample (HCons s0 s1) = do
@@ -102,9 +106,9 @@ instance (HasForward f a0 b0, HasForward g a1 b1) => HasForward (f :++: g) (a0,a
     b1 <- forwardStoch g a1
     return (b0, b1)
 
-data ShortcutSpec a = ShortcutSpec a deriving (Show, Generic)
+newtype ShortcutSpec a = ShortcutSpec a deriving (Show, Generic)
 
-data Shortcut a = Shortcut a deriving (Show, Generic, Parameterized)
+newtype Shortcut a = Shortcut a deriving (Show, Generic, Parameterized)
 
 instance (Randomizable a b) => Randomizable (ShortcutSpec a) (Shortcut b) where
   sample (ShortcutSpec s) = Shortcut <$> sample s
@@ -116,7 +120,7 @@ instance (HasForward a Tensor Tensor) => HasForward (Shortcut a) Tensor Tensor w
     return $ f' + input
 
 data ReplicateSpec b = ReplicateSpec Int b deriving (Show, Generic)
-data Replicate b = Replicate [b] deriving (Show, Generic)
+newtype Replicate b = Replicate [b] deriving (Show, Generic)
 
 instance (Randomizable b c) => Randomizable (ReplicateSpec b) (Replicate c) where
   sample (ReplicateSpec n s) = Replicate <$> sequence (replicate n (sample s))
@@ -202,3 +206,11 @@ toMaybeOutputShapes ::
   ) =>
   a -> input -> HList b
 toMaybeOutputShapes f a = hMap (safeEval . shape) (toOutputs f a) 
+
+mergeParameters :: Parameterized a => (Tensor -> Tensor -> Tensor) -> a -> a -> a
+mergeParameters fn a b =
+  replaceParameters b $
+    zipWith
+      (\a' b' -> IndependentTensor $ fn (toDependent a') (toDependent b'))
+      (flattenParameters a)
+      (flattenParameters b)
