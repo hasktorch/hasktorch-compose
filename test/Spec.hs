@@ -121,3 +121,30 @@ main = hspec $ do
         zero1 = over (types @Tensor) (ones' . shape) $ getLastLayer m1'
         model' = addLastLayer (dropLastLayer m0) (mergeParameters (+) layer0 zero1)
     return ()
+  it "Fanin" $ do
+    m0 <- sample mlpSpec
+    m1 <- sample mlpSpec
+    let l0 = getFirstLayer m0
+        l1 = getFirstLayer m1
+        fin = Fanin l0 l1
+        model' = HCons fin $ dropFirstLayer m0
+        input = ones' [2,784]
+        out = forward model' (input,input)
+    shape out `shouldBe` [2,10]
+  it "Fanout" $ do
+    m0 <- sample (LinearSpec 10 2)
+    m1 <- sample (LinearSpec 10 3)
+    let fout = Fanout m0 m1
+        input = ones' [1,10]
+        (out0,out1) = forward fout input
+    shape out0 `shouldBe` [1,2]
+    shape out1 `shouldBe` [1,3]
+  it "Split layers" $ do
+    m0 <- sample mlpSpec
+    let (h, t) = splitLayers @2 m0
+        input0 = ones'  [1,784]
+        input1 = ones'  [1,64]
+        output0 = forward h input0
+        output1 = forward t input1
+    shape output0 `shouldBe` [1,64]
+    shape output1 `shouldBe` [1,10]

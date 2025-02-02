@@ -20,6 +20,8 @@
 {-# LANGUAGE TypeFamilyDependencies#-}
 {-# LANGUAGE TypeOperators#-}
 {-# LANGUAGE UndecidableInstances#-}
+{-# LANGUAGE AllowAmbiguousTypes#-}
+
 
 module Torch.Compose where
 
@@ -31,6 +33,7 @@ import Data.Coerce
 import Control.Exception
 import System.IO.Unsafe
 import qualified Language.Haskell.TH as TH
+import GHC.TypeLits
 -- import qualified Language.Haskell.TH.Syntax as TH
 
 
@@ -144,14 +147,33 @@ instance (HasForwardAssoc f a) => HasForwardAssoc f (HList '[a]) where
   forwardAssoc f (HCons a HNil) = toHList $ forwardAssoc f a
   forwardStochAssoc f (HCons a HNil) = toHList <$> forwardStochAssoc f a
 
+type family ToHNat (x :: Nat) :: HNat where
+  ToHNat 0 = HZero
+  ToHNat x = HSucc (ToHNat ( x - 1 ))
+
+dropLayers :: forall num a ys xs. (KnownNat num, Coercible a (HList xs), HDrop (ToHNat num) xs ys,  HLengthGe xs (ToHNat num)) => a -> HList ys
+dropLayers m = hDrop (Proxy :: Proxy (ToHNat num)) (coerce m)
+
+takeLayers :: forall num a ys xs. (KnownNat num, Coercible a (HList xs), HTake (ToHNat num) xs ys,  SameLength' (HReplicateR (ToHNat num) ()) ys,  HLengthEq1 ys (ToHNat num), HLengthEq2 ys (ToHNat num),  HLengthGe xs (ToHNat num)) => a -> HList ys
+takeLayers m = hTake (Proxy :: Proxy (ToHNat num)) (coerce m)
+
+splitLayers :: forall num a xs ys xsys. (KnownNat num, Coercible a (HList xsys), HSplitAt1 '[] (ToHNat num) xsys xs ys,  HAppendList1 xs ys xsys,  SameLength' (HReplicateR (ToHNat num) ()) xs,  HLengthEq1 xs (ToHNat num), HLengthEq2 xs (ToHNat num)) => a -> (HList xs, HList ys)
+splitLayers m = hSplitAt (Proxy :: Proxy (ToHNat num)) (coerce m)
+
 dropLastLayer :: (Coercible a (HList xs1), HRevApp xs2 '[x] xs1, HRevApp xs2 '[] sx,  HRevApp xs1 '[] (x : xs2), HRevApp sx '[] xs2) => a -> HList sx
 dropLastLayer m = hReverse (hDrop (Proxy :: Proxy (HSucc HZero)) (hReverse (coerce m)))
 
 addLastLayer :: HAppend l1 (HList '[e]) => l1 -> e -> HAppendR l1 (HList '[e])
 addLastLayer a b = a `hAppend` (b .*. HNil)
 
+dropFirstLayer :: Coercible a (HList (x : ys)) => a -> HList ys
+dropFirstLayer m = hDrop (Proxy :: Proxy (HSucc HZero)) (coerce m)
+
 getLastLayer :: (Coercible a (HList l1), HRevApp l1 '[] (e : l)) => a -> e
 getLastLayer a = hLast (coerce a)
+
+getFirstLayer :: Coercible a (HList (e : l)) => a -> e
+getFirstLayer a = hHead (coerce a)
 
 hScanl :: forall f z ls xs1 sx xs2. (HScanr f z ls xs1, HRevApp xs1 '[] sx, HRevApp sx '[] xs1,  HRevApp xs2 '[] ls, HRevApp ls '[] xs2) => f -> z -> HList xs2 -> HList sx
 hScanl a b c = hReverse $ hScanr a b (hReverse c)
@@ -259,12 +281,5 @@ instanceForwardAssoc model input output =
   |]
 
 instanceForwardAssocs :: [TH.Q TH.Type] -> TH.Q TH.Type -> TH.Q TH.Type -> TH.DecsQ
-instanceForwardAssocs models input output = do
-  decs <- forM models $ \model ->
-    [d|
-        instance HasForwardAssoc $model $input where
-          type ForwardResult $model $input = $output
-          forwardAssoc = forward
-          forwardStochAssoc = forwardStoch
-    |]
-  return $ concat decs
+instanceForwardAssocs models input output =
+  concat <$> forM models (\model -> instanceForwardAssoc model input output)
