@@ -1,21 +1,21 @@
-{-# LANGUAGE TypeOperators#-}
-{-# LANGUAGE FlexibleInstances#-}
-{-# LANGUAGE MultiParamTypeClasses#-}
-{-# LANGUAGE UndecidableInstances#-}
-{-# LANGUAGE DeriveGeneric#-}
+{-# LANGUAGE AllowAmbiguousTypes#-}
+{-# LANGUAGE DataKinds#-}
 {-# LANGUAGE DeriveAnyClass#-}
+{-# LANGUAGE DeriveGeneric#-}
 {-# LANGUAGE DuplicateRecordFields#-}
+{-# LANGUAGE FlexibleContexts#-}
+{-# LANGUAGE FlexibleInstances#-}
+{-# LANGUAGE FunctionalDependencies#-}
+{-# LANGUAGE GADTs#-}
+{-# LANGUAGE MultiParamTypeClasses#-}
+{-# LANGUAGE OverloadedRecordDot#-}
 {-# LANGUAGE RecordWildCards#-}
 {-# LANGUAGE ScopedTypeVariables#-}
-{-# LANGUAGE TypeApplications#-}
-{-# LANGUAGE GADTs#-}
-{-# LANGUAGE OverloadedRecordDot#-}
-{-# LANGUAGE FlexibleContexts#-}
-{-# LANGUAGE TypeFamilies#-}
-{-# LANGUAGE AllowAmbiguousTypes#-}
-{-# LANGUAGE FunctionalDependencies#-}
-{-# LANGUAGE DataKinds#-}
 {-# LANGUAGE StandaloneDeriving#-}
+{-# LANGUAGE TypeApplications#-}
+{-# LANGUAGE TypeFamilies#-}
+{-# LANGUAGE TypeOperators#-}
+{-# LANGUAGE UndecidableInstances#-}
 
 module Main where
 

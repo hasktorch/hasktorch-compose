@@ -10,6 +10,8 @@
 {-# LANGUAGE OverloadedRecordDot#-}
 {-# LANGUAGE PartialTypeSignatures #-}
 {-# LANGUAGE PolyKinds #-}
+{-# LANGUAGE QuasiQuotes #-}
+{-# LANGUAGE TemplateHaskell #-}
 {-# LANGUAGE RecordWildCards#-}
 {-# LANGUAGE ScopedTypeVariables#-}
 {-# LANGUAGE StandaloneDeriving#-}
@@ -19,20 +21,18 @@
 {-# LANGUAGE TypeOperators#-}
 {-# LANGUAGE UndecidableInstances#-}
 
-
 module Torch.Compose where
 
 import Torch
-import Torch.NN
-import Torch.Functional
 import GHC.Generics hiding ((:+:))
--- import Data.Void
 import Data.HList
-import Data.HList (hAppend)
 import Data.Kind
 import Data.Coerce
 import Control.Exception
 import System.IO.Unsafe
+import qualified Language.Haskell.TH as TH
+-- import qualified Language.Haskell.TH.Syntax as TH
+
 
 deriving instance Generic (HList '[])
 deriving instance Generic a => Generic (HList (a ': ax))
@@ -56,13 +56,13 @@ instance HasForward (HList '[]) a a where
   forwardStoch _ = pure
 
 data (://:) a b = Fanout
-  { head :: a
-  , tail :: b
+  { first :: a
+  , second :: b
   } deriving (Show, Eq, Generic)
 
 data (:+:) a b = Fanin
-  { head :: a
-  , tail :: b
+  { first :: a
+  , second :: b
   } deriving (Show, Eq, Generic)
 
 data (:++:) a b = Concat
@@ -134,6 +134,7 @@ instance (HasForward a b b) => HasForward (Replicate a) b b where
 class HasForwardAssoc f a where
   type ForwardResult f a :: Type
   forwardAssoc :: f -> a -> ForwardResult f a
+  forwardStochAssoc :: f -> a -> IO (ForwardResult f a)
 
 toHList :: x -> HList '[x]
 toHList x = HCons x HNil
@@ -141,6 +142,7 @@ toHList x = HCons x HNil
 instance (HasForwardAssoc f a) => HasForwardAssoc f (HList '[a]) where
   type ForwardResult f (HList '[a]) = HList '[ForwardResult f a]
   forwardAssoc f (HCons a HNil) = toHList $ forwardAssoc f a
+  forwardStochAssoc f (HCons a HNil) = toHList <$> forwardStochAssoc f a
 
 dropLastLayer :: (Coercible a (HList xs1), HRevApp xs2 '[x] xs1, HRevApp xs2 '[] sx,  HRevApp xs1 '[] (x : xs2), HRevApp sx '[] xs2) => a -> HList sx
 dropLastLayer m = hReverse (hDrop (Proxy :: Proxy (HSucc HZero)) (hReverse (coerce m)))
@@ -161,26 +163,33 @@ safeEval x = unsafePerformIO $ do
     Left  _ -> return Nothing
     Right v -> return (Just v)
 
-type family ForwardMap (xs :: [*]) (a :: *) :: [*] where
+type family ForwardMap (xs :: [Type]) (a :: Type) :: [Type] where
   ForwardMap '[]  _ = '[]
   ForwardMap (x ': xs) a = ForwardResult x a ': ForwardMap xs (ForwardResult x a)
 
 class Outputs xs input where
   toOutputs' :: HList xs -> input -> HList (ForwardMap xs input)
+  toOutputsWithStoch' :: HList xs -> input -> IO (HList (ForwardMap xs input))
 
 instance HasForwardAssoc x a => HasForwardAssoc x (Maybe a) where
   type ForwardResult x (Maybe a) = Maybe (ForwardResult x a)
   forwardAssoc x (Just a) = Just $ forwardAssoc x a
   forwardAssoc x Nothing = Nothing
+  forwardStochAssoc x (Just a) = Just <$> forwardStochAssoc x a
+  forwardStochAssoc x Nothing = pure Nothing
   
 
 instance (HasForwardAssoc x a, Outputs xs (ForwardResult x a)) => Outputs (x ': xs) a where
   toOutputs' (HCons x xs) a =
     let out = forwardAssoc x a
     in HCons out $ toOutputs' xs out
+  toOutputsWithStoch' (HCons x xs) a = do
+    out <- forwardStochAssoc x a
+    HCons out <$> toOutputsWithStoch' xs out
 
 instance Outputs '[] a where
   toOutputs' _ _ = HNil
+  toOutputsWithStoch' _ _ = pure HNil
 
 toOutputs ::
   (Coercible a (HList xs),
@@ -188,6 +197,13 @@ toOutputs ::
   ) =>
   a -> input -> HList (ForwardMap xs input)
 toOutputs f = toOutputs' (coerce f)
+
+toOutputsWithStoch ::
+  (Coercible a (HList xs),
+   Outputs xs input
+  ) =>
+  a -> input -> IO (HList (ForwardMap xs input))
+toOutputsWithStoch f = toOutputsWithStoch' (coerce f)
 
 toOutputShapes ::
   (Coercible a (HList xs),
@@ -198,6 +214,15 @@ toOutputShapes ::
   a -> input -> HList b
 toOutputShapes f a = hMap shape (toOutputs f a) 
 
+toOutputShapesWithStoch ::
+  (Coercible a (HList xs),
+   HMapAux HList (Tensor -> [Int]) (ForwardMap xs input) b,
+   SameLength' b (ForwardMap xs input),
+   SameLength' (ForwardMap xs input) b, Outputs xs input
+  ) =>
+  a -> input -> IO (HList b)
+toOutputShapesWithStoch f a = hMap shape <$> toOutputsWithStoch f a
+
 toMaybeOutputShapes ::
   (Coercible a (HList xs),
    HMapAux HList (Tensor -> Maybe [Int]) (ForwardMap xs input) b,
@@ -207,6 +232,15 @@ toMaybeOutputShapes ::
   a -> input -> HList b
 toMaybeOutputShapes f a = hMap (safeEval . shape) (toOutputs f a) 
 
+toMaybeOutputShapesWithStoch ::
+  (Coercible a (HList xs),
+   HMapAux HList (Tensor -> Maybe [Int]) (ForwardMap xs input) b,
+   SameLength' b (ForwardMap xs input),
+   SameLength' (ForwardMap xs input) b, Outputs xs input
+  ) =>
+  a -> input -> IO (HList b)
+toMaybeOutputShapesWithStoch f a = hMap (safeEval . shape) <$> toOutputsWithStoch f a
+
 mergeParameters :: Parameterized a => (Tensor -> Tensor -> Tensor) -> a -> a -> a
 mergeParameters fn a b =
   replaceParameters b $
@@ -214,3 +248,23 @@ mergeParameters fn a b =
       (\a' b' -> IndependentTensor $ fn (toDependent a') (toDependent b'))
       (flattenParameters a)
       (flattenParameters b)
+
+instanceForwardAssoc :: TH.Q TH.Type -> TH.Q TH.Type -> TH.Q TH.Type -> TH.DecsQ
+instanceForwardAssoc model input output =
+  [d|
+      instance HasForwardAssoc $model $input where
+        type ForwardResult $model $input = $output
+        forwardAssoc = forward
+        forwardStochAssoc = forwardStoch
+  |]
+
+instanceForwardAssocs :: [TH.Q TH.Type] -> TH.Q TH.Type -> TH.Q TH.Type -> TH.DecsQ
+instanceForwardAssocs models input output = do
+  decs <- forM models $ \model ->
+    [d|
+        instance HasForwardAssoc $model $input where
+          type ForwardResult $model $input = $output
+          forwardAssoc = forward
+          forwardStochAssoc = forwardStoch
+    |]
+  return $ concat decs

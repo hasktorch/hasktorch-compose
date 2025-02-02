@@ -14,6 +14,8 @@
 {-# LANGUAGE NoFieldSelectors#-}
 {-# LANGUAGE TypeFamilies#-}
 {-# LANGUAGE DataKinds#-}
+{-# LANGUAGE TemplateHaskell #-}
+{-# LANGUAGE QuasiQuotes #-}
 
 module Torch.Compose.NN where
 
@@ -21,7 +23,6 @@ import Torch
 import Torch.Compose
 import System.IO.Unsafe (unsafePerformIO)
 import GHC.Generics hiding ((:+:))
-import Data.HList
 
 data ReluSpec = ReluSpec deriving (Generic, Show, Eq)
 data Relu = Relu deriving (Generic, Parameterized, Show, Eq)
@@ -32,9 +33,8 @@ instance HasForward Relu Tensor Tensor where
   forward _ = relu
   forwardStoch _ i = pure $ relu i
 
-
-data DropoutSpec = DropoutSpec
-  {dropoutProb :: Double
+newtype DropoutSpec = DropoutSpec
+  { dropoutProb :: Double
   } deriving (Show, Eq)
 
 newtype Dropout = Dropout
@@ -136,38 +136,6 @@ instance HasForward LogSoftMax Tensor Tensor where
   forward _ = logSoftmax (Dim 1)
   forwardStoch _ i = pure $ logSoftmax (Dim 1) i
 
-instance HasForwardAssoc Linear Tensor where
-  type ForwardResult Linear Tensor = Tensor
-  forwardAssoc = forward
-
-instance HasForwardAssoc Relu Tensor where
-  type ForwardResult Relu Tensor = Tensor
-  forwardAssoc = forward
-
-instance HasForwardAssoc LogSoftMax Tensor where
-  type ForwardResult LogSoftMax Tensor = Tensor
-  forwardAssoc = forward
-
-instance HasForwardAssoc AdaptiveAvgPool2d Tensor where
-  type ForwardResult AdaptiveAvgPool2d Tensor = Tensor
-  forwardAssoc = forward
-
-instance HasForwardAssoc MaxPool2d Tensor where
-  type ForwardResult MaxPool2d Tensor = Tensor
-  forwardAssoc = forward
-
-instance HasForwardAssoc Reshape Tensor where
-  type ForwardResult Reshape Tensor = Tensor
-  forwardAssoc = forward
-
-instance HasForwardAssoc Conv2d' Tensor where
-  type ForwardResult Conv2d' Tensor = Tensor
-  forwardAssoc = forward
-
-instance HasForwardAssoc Dropout Tensor where
-  type ForwardResult Dropout Tensor = Tensor
-  forwardAssoc = forward
-
 data Conv2dSpec' = Conv2dSpec'
   { inputChannelSize2d :: Int
   , outputChannelSize2d :: Int
@@ -175,12 +143,16 @@ data Conv2dSpec' = Conv2dSpec'
   , kernelWidth2d :: Int
   , stride :: (Int, Int)
   , padding ::(Int, Int)
-  }
+  } deriving (Generic, Show, Eq)
 
 data Conv2d' = Conv2d'
   { spec :: Conv2dSpec'
   , params :: Conv2d
-  } 
+  } deriving (Generic, Show)
+
+instance Parameterized Conv2d' where
+  flattenParameters d = flattenParameters d.params
+  _replaceParameters d = (\p -> d {params = p}) <$> _replaceParameters d.params
 
 instance HasForward Conv2d' Tensor Tensor where
   forward params = conv2dForward params.params params.spec.stride params.spec.padding
@@ -198,5 +170,17 @@ instance Randomizable Conv2dSpec' Conv2d' where
       { spec = spec
       , params = a
       }
-      
 
+-- Generate HasForwardAssoc instances from HasForward instances.
+instanceForwardAssocs
+  [ [t| Linear |]
+  , [t| Relu |]
+  , [t| LogSoftMax |]
+  , [t| AdaptiveAvgPool2d |]
+  , [t| MaxPool2d |]
+  , [t| Reshape |]
+  , [t| Dropout |]
+  , [t| Conv2d' |]
+  ]
+  [t| Tensor |] [t| Tensor |]
+  

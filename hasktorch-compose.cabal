@@ -21,6 +21,7 @@ common base
       base >= 4.12 && < 5
     , hasktorch >= 0.2 && < 0.3
     , HList
+    , template-haskell
 
 common binary-base
   import: base
