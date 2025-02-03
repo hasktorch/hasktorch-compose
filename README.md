@@ -58,7 +58,7 @@ You can extract the first or last layer of a composed model using `getFirstLayer
 
 ```haskell
 -- Assume 'model' is an instance of `MLP`
-(MLP (model :: a)) <- sample mlpSpec
+model <- sample mlpSpec
 let firstLayer = getFirstLayer model -- Get the first Linear layer
 let lastLayer = getLastLayer model  -- Get the LogSoftmax layer
 let modelWithoutLast = dropLastLayer model
@@ -82,7 +82,7 @@ The `toOutputShapes` function allows you to get the shapes of each layer's outpu
 
 ```haskell
 -- Assume 'model' is an instance of `MLP`
-(MLP model) <- sample mlpSpec
+model <- sample mlpSpec
 let input = ones' [2,784]
 let outputShapes = toOutputShapes model input
 -- outputShapes will be a HList containing the shape of each layer's output.
