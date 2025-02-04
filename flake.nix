@@ -14,6 +14,10 @@
           inherit system;
           config.allowUnfree = true;
           config.cudaSupport = system == "x86_64-linux";
+          # config.ihaskell.packages = pkgs: with pkgs; [
+          #   hasktorch
+          #   hvega
+          # ];
         };
         ghcWithHasktorch = pkgs.haskellPackages.ghcWithPackages (pkgs: with pkgs; [
           hasktorch
@@ -26,6 +30,7 @@
             ghcWithHasktorch
             cabal-install
             stack
+#            ihaskell
           ];
           shellHook = ''
             source ${git}/share/bash-completion/completions/git-prompt.sh

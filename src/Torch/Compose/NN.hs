@@ -171,6 +171,111 @@ instance Randomizable Conv2dSpec' Conv2d' where
       , params = a
       }
 
+
+--------------------------------------------------------------------------------
+-- Multi-Head Attention Data Structures
+--------------------------------------------------------------------------------
+
+-- | Specification for initializing a MultiHeadAttention module.
+data MultiHeadAttentionSpec = MultiHeadAttentionSpec
+  { mhaEmbedDim :: Int     -- ^ Model embedding dimension
+  , mhaNumHeads :: Int     -- ^ Number of attention heads
+  } deriving (Show, Eq)
+
+-- | Data type that holds parameters for Multi-Head Attention.
+data MultiHeadAttention = MultiHeadAttention
+  { wQ      :: Linear      -- ^ Linear projection for the queries
+  , wK      :: Linear      -- ^ Linear projection for the keys
+  , wV      :: Linear      -- ^ Linear projection for the values
+  , wO      :: Linear      -- ^ Final linear projection after combining heads
+  , headDim :: Int         -- ^ Dimension per head = embedDim / numHeads
+  , nHeads  :: Int         -- ^ Number of attention heads
+  } deriving (Show)
+
+-- | Create random parameters for Multi-Head Attention given the specification.
+instance Randomizable MultiHeadAttentionSpec MultiHeadAttention where
+  sample MultiHeadAttentionSpec{..} = do
+    let headDim = mhaEmbedDim `Prelude.div` mhaNumHeads
+    wQ' <- sample $ LinearSpec mhaEmbedDim mhaEmbedDim
+    wK' <- sample $ LinearSpec mhaEmbedDim mhaEmbedDim
+    wV' <- sample $ LinearSpec mhaEmbedDim mhaEmbedDim
+    wO' <- sample $ LinearSpec mhaEmbedDim mhaEmbedDim
+    return $ MultiHeadAttention
+      { wQ      = wQ'
+      , wK      = wK'
+      , wV      = wV'
+      , wO      = wO'
+      , headDim = headDim
+      , nHeads  = mhaNumHeads
+      }
+
+--------------------------------------------------------------------------------
+-- Forward Pass (Scaled Dot-Product Attention + Multi-Head Logic)
+--------------------------------------------------------------------------------
+
+-- | Compute scaled dot-product attention for query, key, value tensors.
+--   The typical shape for q, k, v is:
+--      [batchSize, numHeads, seqLen, headDim]
+--
+--   Returns: [batchSize, numHeads, seqLen, headDim]
+scaledDotProductAttention
+  :: Tensor  -- ^ Queries (q)
+  -> Tensor  -- ^ Keys (k)
+  -> Tensor  -- ^ Values (v)
+  -> Tensor  -- ^ Output (contextual embeddings)
+scaledDotProductAttention q k v =
+  let -- q*k^T -> [batchSize, numHeads, seqLen, seqLen]
+      dk          = fromIntegral (shape q !! 3) -- headDim
+      scores      = (q `matmul` transpose2D k) / Torch.sqrt (asTensor (dk :: Float))
+      attnWeights = softmax (Dim (-1)) scores         -- softmax over last dim (seqLen)
+      output      = attnWeights `matmul` v      -- multiply by values
+  in output
+
+-- | Forward pass for Multi-Head Attention (without any mask or dropout, minimal).
+multiHeadAttention
+  :: MultiHeadAttention
+  -> Tensor  -- ^ Input queries [batchSize, seqLen, embedDim]
+  -> Tensor  -- ^ Input keys    [batchSize, seqLen, embedDim]
+  -> Tensor  -- ^ Input values  [batchSize, seqLen, embedDim]
+  -> Tensor  -- ^ Output        [batchSize, seqLen, embedDim]
+multiHeadAttention MultiHeadAttention{..} queries keys values =
+  let
+    -- Project inputs to Q, K, V space
+    q = linear wQ queries   -- [batchSize, seqLen, embedDim]
+    k = linear wK keys      -- [batchSize, seqLen, embedDim]
+    v = linear wV values    -- [batchSize, seqLen, embedDim]
+
+    batchSize = shape queries !! 0
+    seqLen    = shape queries !! 1
+
+    -- Reshape for multi-head: [batchSize, seqLen, nHeads*headDim]
+    -- -> [batchSize, seqLen, nHeads, headDim]
+    -- -> [batchSize, nHeads, seqLen, headDim]
+    reshapeForHeads t =
+      let t' = view [batchSize, seqLen, nHeads*headDim] t
+          t''= view [batchSize, seqLen, nHeads, headDim] t'
+      in permute [0,2,1,3] t''  -- reorder dimensions to [batchSize, nHeads, seqLen, headDim]
+
+    qHeads = reshapeForHeads q
+    kHeads = reshapeForHeads k
+    vHeads = reshapeForHeads v
+
+    -- Apply scaled dot-product attention
+    attnOutput = scaledDotProductAttention qHeads kHeads vHeads
+        -- shape: [batchSize, nHeads, seqLen, headDim]
+
+    -- Convert back: [batchSize, nHeads, seqLen, headDim]
+    -- -> [batchSize, seqLen, nHeads, headDim]
+    -- -> [batchSize, seqLen, nHeads*headDim]
+    attnOutputTrans = permute [0,2,1,3] attnOutput
+    combinedHeads   = view [batchSize, seqLen, nHeads*headDim] attnOutputTrans
+
+    -- Final linear
+    out = linear wO combinedHeads  -- [batchSize, seqLen, embedDim]
+  in out
+
+
+
 -- Generate HasForwardAssoc instances from HasForward instances.
 instanceForwardAssocs
   [ [t| Linear |]
