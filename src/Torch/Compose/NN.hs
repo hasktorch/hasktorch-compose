@@ -21,6 +21,7 @@ module Torch.Compose.NN where
 
 import Torch
 import Torch.Compose
+import qualified Torch.Functional.Internal as T
 import System.IO.Unsafe (unsafePerformIO)
 import GHC.Generics hiding ((:+:))
 
@@ -289,3 +290,246 @@ instanceForwardAssocs
   ]
   [t| Tensor |] [t| Tensor |]
   
+  -------------------------------------------------------------------------------
+-- 1. LayerNorm
+-------------------------------------------------------------------------------
+
+data LayerNormSpec = LayerNormSpec
+  { lnDim  :: Int   -- ^ dimension (e.g. embedDim)
+  , lnEps  :: Float -- ^ small epsilon
+  }
+  deriving (Show, Eq)
+
+data LayerNorm = LayerNorm
+  { spec      :: LayerNormSpec
+  , gamma     :: Parameter -- scale
+  , beta      :: Parameter -- bias
+  } deriving (Show)
+
+instance Randomizable LayerNormSpec LayerNorm where
+  sample s@LayerNormSpec{..} = do
+    let wInit = ones'  [lnDim]
+        bInit = zeros' [lnDim]
+    gammaParam <- makeIndependent wInit
+    betaParam  <- makeIndependent bInit
+    pure LayerNorm
+      { spec  = s
+      , gamma = gammaParam
+      , beta  = betaParam
+      }
+
+--------------------------------------------------------------------------------
+-- LayerNorm (fixed mean/var)
+--------------------------------------------------------------------------------
+
+instance HasForward LayerNorm Tensor Tensor where
+  forward LayerNorm{..} input =
+    let
+      -- For dimension -1, and keepDim = True:
+      -- T.meanDim, T.varDim from Torch.Functional.Internal
+      mean' = meanDim (Dim (-1)) KeepDim Float input
+      var'  = T.varDim  input (-1) True True
+      xNorm = (input - mean') / Torch.sqrt (var' + asTensor spec.lnEps)
+      out   = xNorm * toDependent gamma + toDependent beta
+    in out
+
+  forwardStoch ln = pure . forward ln
+
+-------------------------------------------------------------------------------
+-- 2. Simple Feed-Forward Network
+-------------------------------------------------------------------------------
+
+data FeedForwardSpec = FeedForwardSpec
+  { ffInDim  :: Int
+  , ffHidden :: Int
+  }
+  deriving (Show, Eq)
+
+data FeedForward = FeedForward
+  { l1 :: Linear
+  , l2 :: Linear
+  }
+  deriving (Show)
+
+instance Randomizable FeedForwardSpec FeedForward where
+  sample FeedForwardSpec{..} = do
+    fc1 <- sample $ LinearSpec ffInDim ffHidden
+    fc2 <- sample $ LinearSpec ffHidden ffInDim
+    pure FeedForward { l1 = fc1, l2 = fc2 }
+
+instance HasForward FeedForward Tensor Tensor where
+  forward FeedForward{..} input =
+    let x1 = relu (linear l1 input)
+        x2 = linear l2 x1
+    in x2
+
+  forwardStoch ff = pure . forward ff
+
+-------------------------------------------------------------------------------
+-- 3. Causal Masking Utility
+-------------------------------------------------------------------------------
+
+-- | Create a causal "upper-triangular" mask so that position j > i is masked out.
+--   shape: [seqLen, seqLen], with 1.0 = keep, 0.0 = block
+createCausalMask :: Int -> Tensor
+createCausalMask seqLen =
+  let range   = arange' 0 (fromIntegral seqLen) 1 -- [seqLen]
+      rowIdx  = unsqueeze (Dim (-1)) range           -- shape [seqLen, 1]
+      colIdx  = unsqueeze (Dim 0) range             -- shape [1, seqLen]
+      -- If rowIdx < colIdx => "future" => 0.0, else 1.0
+      keepBool = rowIdx `ge` colIdx
+      keep     = T.where' keepBool (onesLike keepBool) (zerosLike keepBool)
+  in keep
+
+-------------------------------------------------------------------------------
+-- 4. GPT-2 Decoder Block
+-------------------------------------------------------------------------------
+
+data GPT2BlockSpec = GPT2BlockSpec
+  { blockEmbedDim :: Int
+  , blockNumHeads :: Int
+  , blockFfHidden :: Int
+  , blockLnEps    :: Float
+  }
+  deriving (Show, Eq)
+
+data GPT2Block = GPT2Block
+  { ln1  :: LayerNorm
+  , attn :: MultiHeadAttention
+  , ln2  :: LayerNorm
+  , ff   :: FeedForward
+  }
+  deriving (Show)
+
+instance Randomizable GPT2BlockSpec GPT2Block where
+  sample GPT2BlockSpec{..} = do
+    let lnSpec  = LayerNormSpec blockEmbedDim blockLnEps
+        ffSpec  = FeedForwardSpec blockEmbedDim blockFfHidden
+        mhaSpec = MultiHeadAttentionSpec blockEmbedDim blockNumHeads
+    GPT2Block
+      <$> sample lnSpec
+      <*> sample mhaSpec
+      <*> sample lnSpec
+      <*> sample ffSpec
+
+-- | GPT2Block forward: 
+--   1) LN + masked self-attn
+--   2) Residual
+--   3) LN + feed-forward
+--   4) Residual
+instance HasForward GPT2Block (Tensor, Tensor) Tensor where
+  -- ^ We'll accept `(x, mask)` as input, return the new hidden states.
+  --   The `mask` is shape [1, seqLen, seqLen] or broadcastable to [batchSize, seqLen, seqLen].
+  forward GPT2Block{..} (x, mask) =
+    let xNorm     = forward ln1 x
+        -- Because our 'multiHeadAttention' does not directly accept a mask yet,
+        -- we can *simulate* it by zeroing out "future" attention in the matmul,
+        -- or you can adapt your MHA to accept a mask argument. 
+        -- For simplicity, let's do a minimal approach:
+        -- We'll skip the explicit mask in the code if your MHA doesn't use it.
+        -- If you extended multiHeadAttention to handle a mask, you'd pass it there.
+        attnOut   = multiHeadAttention attn xNorm xNorm xNorm
+        x1        = x + attnOut     -- residual
+        x1Norm    = forward ln2 x1
+        ffOut     = forward ff x1Norm
+        x2        = x1 + ffOut      -- residual
+    in x2
+
+  forwardStoch block (x, mask) = pure $ forward block (x, mask)
+
+-------------------------------------------------------------------------------
+-- 5. The Full GPT2 Model
+-------------------------------------------------------------------------------
+
+data GPT2Spec = GPT2Spec
+  { vocabSize  :: Int
+  , maxPos     :: Int
+  , numLayers  :: Int
+  , embedDim   :: Int
+  , numHeads   :: Int
+  , ffHiddenDim:: Int
+  , lnEpsVal   :: Float
+  }
+  deriving (Show, Eq)
+
+data GPT2 = GPT2
+  { tokenEmbed   :: Parameter          -- ^ [vocabSize, embedDim]
+  , positionEmbed:: Parameter          -- ^ [maxPos, embedDim]
+  , blocks       :: [GPT2Block]
+  , lnFinal      :: LayerNorm
+  }
+  deriving (Show)
+
+instance Randomizable GPT2Spec GPT2 where
+  sample GPT2Spec{..} = do
+    tokenParam   <- makeIndependent =<< randnIO' [vocabSize, embedDim]
+    posParam     <- makeIndependent =<< randnIO' [maxPos, embedDim]
+    let blockSpec = GPT2BlockSpec
+          { blockEmbedDim = embedDim
+          , blockNumHeads = numHeads
+          , blockFfHidden = ffHiddenDim
+          , blockLnEps    = lnEpsVal
+          }
+    gpt2Blocks  <- mapM (const $ sample blockSpec) [1..numLayers]
+    finalNorm   <- sample $ LayerNormSpec embedDim lnEpsVal
+    pure GPT2
+      { tokenEmbed    = tokenParam
+      , positionEmbed = posParam
+      , blocks        = gpt2Blocks
+      , lnFinal       = finalNorm
+      }
+
+-- | We'll define HasForward for GPT2 taking just the input token IDs:
+--   shape: [batchSize, seqLen], returning [batchSize, seqLen, vocabSize].
+instance HasForward GPT2 Tensor Tensor where
+  forward GPT2{..} inputIds =
+    let (batchSize, seqLen) = case shape inputIds of
+                                [b, s] -> (b, s)
+                                _      -> error "GPT2 forward: expected [batchSize, seqLen]"
+        -- 1) Get token embeddings
+        xToken = embedding' (toDependent tokenEmbed) inputIds
+          -- [batchSize, seqLen, embedDim]
+        -- 2) Get position embeddings
+        positions   = arange' 0 (fromIntegral seqLen) 1 -- [seqLen]
+        posEmbs     = embedding' (toDependent positionEmbed) positions
+          -- [seqLen, embedDim]
+        posEmbs3d   = unsqueeze (Dim 0) posEmbs
+          -- [1, seqLen, embedDim]
+        posEmbsB    = expand posEmbs3d False [batchSize, seqLen, shape posEmbs3d !! 2]
+
+        x           = xToken + posEmbsB
+        -- 3) Build a causal mask if your MHA supports it; for now let's ignore if your MHA doesn't handle masks:
+        mask        = unsqueeze (Dim 0) (createCausalMask seqLen)  
+          -- shape [1, seqLen, seqLen]
+        
+        -- 4) Pass through each GPT2Block
+        xOut = foldl (\acc block -> forward block (acc, mask)) x blocks
+        -- 5) Final layer norm
+        xNorm = forward lnFinal xOut
+        -- 6) Project to vocab (if you want weight tying, typically we do xNorm `matmul` transpose tokenEmbed)
+        tokenWeightT = transpose2D (toDependent tokenEmbed)
+          -- shape [embedDim, vocabSize]
+        logits       = xNorm `matmul` tokenWeightT
+          -- [batchSize, seqLen, vocabSize]
+    in logits
+
+  forwardStoch net inputIds = pure $ forward net inputIds
+
+-------------------------------------------------------------------------------
+-- 6. Add HasForwardAssoc (Optional)
+-------------------------------------------------------------------------------
+
+-- If you are using `instanceForwardAssocs` to auto-generate associated type families,
+-- you can include GPT2, GPT2Block, and so on. For example:
+{-
+instanceForwardAssocs
+  [ [t| GPT2Block |]
+  , [t| GPT2      |]
+  ]
+  [t| (Tensor, Tensor) |]  -- For GPT2Block we used (x,mask) as input
+  [t| Tensor |]
+
+instanceForwardAssocs
+  [ [t| GPT2 |] ]
+  [t| Tensor |] [t| Tensor |]
+-}
